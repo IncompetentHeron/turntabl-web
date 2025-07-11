@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-background text-primary font-sans;
+}
+
+#root {
+  @apply min-h-screen;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  @apply font-serif;
+}
+
+@layer components {
+  .container {
+    @apply max-w-container mx-auto px-4;
+  }
+  
+  .btn {
+    @apply px-4 py-2 rounded-full font-medium transition-colors;
+  }
+  
+  .btn-primary {
+    @apply bg-accent hover:bg-accent/90 text-white;
+  }
+  
+  .btn-secondary {
+    @apply bg-surface hover:bg-surface/90 text-primary;
+  }
+  
+  .input {
+    @apply bg-surface border border-white/10 rounded-lg px-4 py-2 text-primary 
+           placeholder:text-white/40 focus:outline-none focus:border-accent/50;
+  }
+  
+  .card {
+    @apply bg-surface rounded-lg border border-white/10 overflow-hidden;
+  }
+
+  /* Auth UI customization */
+  .auth-container {
+    @apply space-y-4;
+  }
+
+  .auth-button {
+    @apply w-full px-4 py-2 rounded-full font-medium transition-colors bg-accent hover:bg-accent/90 text-white;
+  }
+
+  .auth-input {
+    @apply w-full px-4 py-2 bg-surface border border-white/10 rounded-lg text-primary 
+           placeholder:text-white/40 focus:outline-none focus:border-accent/50;
+  }
+}
+
+/* TipTap Editor Styles */
+.ProseMirror {
+  @apply outline-none;
+}
+
+.ProseMirror p {
+  @apply mb-4;
+}
+
+.ProseMirror ul {
+  @apply list-disc pl-6 mb-4;
+}
+
+.ProseMirror ol {
+  @apply list-decimal pl-6 mb-4;
+}
+
+.ProseMirror h1 {
+  @apply text-2xl font-bold mb-4;
+}
+
+.ProseMirror h2 {
+  @apply text-xl font-bold mb-3;
+}
+
+.ProseMirror h3 {
+  @apply text-lg font-bold mb-2;
+}
+
+.ProseMirror blockquote {
+  @apply border-l-4 border-accent pl-4 italic my-4;
+}
+
+.ProseMirror .mention {
+  @apply text-accent font-medium cursor-pointer hover:underline;
+}
+
+.ProseMirror p.is-empty::before {
+  @apply text-white/40;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.perspective {
+  perspective: 2000px;
+  transform-style: preserve-3d;
+}
+
+/* Star Rating Styles */
+.star-rating {
+  @apply text-2xl;
+}
+
+.star-rating button {
+  @apply w-10 h-10 text-2xl flex items-center justify-center;
+}

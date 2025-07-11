@@ -1,0 +1,397 @@
+This is a comprehensive, detailed checklist  for the Turntabl website , outlining all the features, logic, and design elements needed for the platform. It covers:
+
+- Frontend UI components  
+- Backend functionality  
+- Database requirements  
+- User flows  
+- Design system elements (colors, typography, spacing)  
+- Technical infrastructure needed
+
+
+
+1. Frontend UI Components
+
+Global Components
+- **Header Bar / Navigation**  
+  - Logo 
+  - Search bar (with suggestion/autocomplete?)  
+  - Navigation links/buttons: _Log In_, _Sign Up_  (for not logged-in users)
+  - Notification button 
+  - Responsive Hamburger menu (mobile)  
+  - Sticky header for permanent visibility unless user is viewing a pop-up
+
+- **Footer**  
+  - Social media links  
+  - Terms of service / Privacy policy links  
+  - Contact / About links  
+
+Home / Landing Page
+
+- **Hero Section:**  
+  - Three-album rotating carousel featuring latest releases
+  - Tagline: "Show them why your taste is better"  
+  - Smaller H1: “Discover, review, and share your favourite music with Turntabl”
+
+- **Popular This Week Carousel / Grid**  
+  - A scrollable row of popular albums this week. Top 10 shown. 
+  - ‘See more’ button goes to a paginated tiled display of all popular albums.
+  - Each album shows: cover art thumbnail, album title (clickable), artist name (clickable), date
+- **Recently Reviewed Carousel / Grid**  
+  - A scrollable or tiled display of the most recently reviewed albums
+  - Each album shows: cover art thumbnail
+  - Icon + short description blocks explaining site features  
+- **Popular Reviews Feed**  
+  - Feed of popular reviews from the past month, top 10 shown
+  - ‘See more’ button goes to an ‘infinite’ scrolling and loading feed of all popular reviews from the month.
+  - Uses Unknown review cards
+
+- **Popular Reviews Section**  
+  - List of popular user reviews from the past month, top 10 shown
+  - ‘See more’ button goes to an ‘infinite’ scrolling and loading feed of all popular reviews from the month.
+  - Uses Unknown review cards with:  
+    - Review title (linked)  
+    - Album cover thumbnail  
+    - Album name (linked) and artist name (linked)  
+    - Star rating visualization (filled/unfilled stars)  
+    - Review excerpt with "read more" capability if review exceeds standard length.
+    - Reviewer profile info: avatar, username, follower count, interaction counts (favorites, comments)  
+    - Comments count, ability to open comments  
+    - Ability to like a review, with visual feedback to show whether you have liked the review. (Outline vs Solid icon, and white vs accent2 colour)
+
+- **Trending Lists Section**  
+  - User-created lists of songs/albums  
+  - List title with description, favorite and comment counts  
+  - Display key albums/singles in each list with thumbnails  
+
+- **Hall of Fame Section**  
+  - Most-followed community members with profile picture, username, follower and review counts.
+  - Follow and Profile buttons  
+
+- **Create Account Call-to-Action**  
+  - Encouraging users to sign up  
+  - Simple/sign-up form or redirect button  
+
+Album Page
+
+- Album metadata:  
+  - Cover image, title, artist(s) (clickable)  
+  - Album type (e.g., Album, Reissue)  
+  - Year of release (optional)  
+  - Ratings summary (average star rating, number of ratings)  
+  - Option to rate/review (logged-in users)  
+- User interactions
+  - ‘Like’ an album
+  - Add to a list
+  - Add to Listen Later
+  - Record a listen
+  - Leave a review (users can review multiple times)
+
+- User reviews about the album (using Known review cards)
+  - Review author, star rating, review date, review text  
+  - like/comment features with responsive buttons
+  - Threads of comments beneath reviews  
+- Three stacked feeds: Top reviews, Reviews from people you follow, and Your Reviews
+  - Top and Followed reviews display max 10 reviews, with a ‘See more’ button that goes to an ‘infinite’ scrolling and loading feed of all reviews in that category
+  - User’s reviews display max 5 reviews with a see more button.
+- ‘Top Lists’ and ‘Lists from Users you follow’ sections
+  - User-created lists of including the album
+  - List title with description, favorite and comment counts  
+  - Display highlighted album and other key albums/singles in each list with thumbnails  
+
+
+- Page layout 
+  - Album Information: Display cover art, title, artist, release date, and duration at top of page
+      - Left Side (⅔): Review rating chart and average, write review button and total ratings with review feeds for top reviews and then followed reviews and then the user’s reviews underneath.
+      - Right side (⅓) Link to album on Spotify, log a listen button and Tracklist, each track linked to Spotify. Then top lists and followed lists.
+
+Artist Page
+
+- Artist profile data:  
+  - Artist name
+  - Profile image/banner  
+  - List of releases with release dates, broken down by albums, EPs, Singles 
+  - Top user reviews related to artist releases  
+  - Highlight an artist’s top five most liked/reviewed albums
+  - Feature any releases from the last four weeks at the top of the profile.
+  - Top artist lists shown
+
+User Profile Page
+
+- Profile picture, display name, username  
+- User bio
+- Stats: number of reviews, lists created, followers, following  
+- Reviews, Lists and Listens from user shown in feeds under tabs underneath profile header
+  - ‘Liked albums’ is a default list in the list tab, and ‘Listen Later is a default list in the ‘Listens’ tab. Users can elect to hide these lists from other users with an eye icon on the right. 
+- Ability to follow/unfollow user  
+
+
+Review Write/Edit Page
+
+- Form to write review:  
+  - Select album  
+  - Star rating input with accompanying slider and input for 1-100 rating  
+  - Text input area with rich-text support  
+  - Date picker with custom designed calendar
+  - Visibility options 
+  - Post Review / Save draft / Cancel  
+
+List Creation / Editing Page
+
+- Create or edit lists:  
+  - List title  
+  - Description  
+  - Add/remove albums or songs via search/autocomplete  
+  - Reorder items functionality  
+  - Save / Cancel  
+
+Search Results Page
+
+- Search bar permanently visible in header
+- Filters: Albums, Artists, Users  
+- Results paginated (20 per page)
+- Display search results with thumbnails and necessary information
+
+Notifications / Activity Feed
+
+- Display user notifications: new followers/ follows back, comments, replies, review likes  
+- Mark notifications as read/unread automatically
+
+Comments Section
+
+- Nested comments/replies on reviews and lists  
+- User mentions
+  - Automatic mention when replying to a comment
+- Like comments  
+- Minimal formatting support (markdown or rich-text)  
+
+UI Elements Summary
+
+- Buttons (primary, secondary, disabled)  
+- Inputs (text, search, dropdowns, star rating inputs)  
+- Modal dialogs (for login/signup, confirming actions)  
+- Loaders/spinners for async data  
+- Pagination controls / infinite scroll  
+- Tooltips and popovers  
+- Responsive breakpoints for desktop, tablet, and mobile  
+
+2. Backend Functionality
+
+User Authentication & Management
+
+- Registration with email + password (plus OAuth/social login optional)  
+- Login/logout sessions (JWT or session cookies)  
+- Password reset mechanism (email/SMS)  
+- Email verification  
+- Profile management (update avatar, bio, preferences)  
+- User roles and permissions (regular user, verified user, admin)  
+
+Core Entities & Features
+
+- Albums  
+  - CRUD operations  
+  - Metadata storage (title, artist ID, cover image, release type/year, genres)  
+  - Average rating calculation dynamically updated  
+
+- Artists  
+  - Metadata storage (name, bio, images, social links)  
+  - CRUD operations (admin-level)  
+
+- Reviews  
+  - Tie reviews to user accounts and albums  
+  - Star rating + review text  
+  - Commenting on reviews  
+  - Likes  for reviews  
+  - Sorting/filtering (most popular, trending, recent)  
+  - Moderation layer for abusive content  
+
+- Lists  
+  - Tie to users  
+  - Orderable collection of albums/songs  
+  - Public/private setting (if supported)  
+  - Voting/favoriting/commenting on lists  
+
+- Comments  
+  - Nested comments on reviews and lists  
+  - Likes for comments  
+  - Moderation layer for abusive content  
+
+Social Interactions
+
+- Follow/unfollow/block users
+- Favorite reviews, lists, albums  
+- Notifications for social events (new follower, comment reply, upvote received)  
+- Feed of trending/popular content based on engagement metrics  
+- Option to set profile to private, so reviews etc. can only be seen by followers, and follow requests must be approved by the user.
+
+Search Functionality
+
+- Full-text search across artists, albums, users
+- Autocomplete suggestions  
+- Filters and sorting of results  
+
+Analytics & Metrics
+
+- Track page views, user engagement  
+- Trending algorithms for Popular This Week, Trending Reviews, Top 250, etc.  
+- Rate-limiting to prevent abuse (review spam/fake accounts)  
+
+API Endpoints
+
+- User auth: register, login, logout, password reset  
+- Albums: get by id, list/popular/trending, search  
+- Artists: get by id, list/popular, search  
+- Reviews: create, update, delete, list by album/user  
+- Lists: create, update, delete, list by user/trending  
+- Comments: create, update, delete, list for review/list  
+- Notifications: list, mark as read  
+- Follow/favorite actions: create/delete  
+
+Admin Panel
+
+- Manage users, artists, albums, reviews  
+- Content moderation (flagging/reviewing inappropriate content)  
+- Analytics dashboards for active users, reviews, etc.  
+
+3. Database Requirements
+
+### Primary Data Models
+
+- **Users**  
+  - id, username, email, password_hash, avatar_url  
+  - bio, joined_at, verified, follower_count, following_count  
+
+- **Artists**  
+  - id, name, bio, images, social_links, created_at, updated_at  
+
+- **Albums**  
+  - id, title, artist_id (FK), cover_image_url, release_type, release_year, genres, created_at  
+
+- **Reviews**  
+  - id, user_id (FK), album_id (FK), rating (1-5), review_text, created_at, updated_at, upvotes_count  
+
+- **Lists**  
+  - id, user_id (FK), title, description, is_public, created_at, updated_at  
+
+- **ListItems**  
+  - id, list_id (FK), album_id (FK), position  
+
+- **Comments** (for reviews and lists)  
+  - id, user_id, parent_comment_id (nullable), review_id (nullable), list_id (nullable), comment_text, created_at, updated_at  
+
+- **Followers**  
+  - id, follower_user_id, following_user_id  
+
+- **Favorites**  
+  - id, user_id, entity_type (review/list/album), entity_id  
+
+- **Notifications**  
+  - id, user_id, type, reference_id, is_read, created_at  
+
+Indexing & Performance
+
+- Indexes on usernames/emails (Users)  
+- Full-text indexes on review_text, album titles, artist names  
+- Composite indexes for follower queries, favorites, comments  
+- Caching popular queries (Trending, Popular) in Redis or similar  
+
+4. User Flows
+
+New User Onboarding Flow
+
+- Landing page -> Sign up (email + password or social login)  
+- Email verification  
+- Welcome/onboarding screens describing features  
+- Prompt to follow popular reviewers or artists  
+- Suggest adding music to collection / writing first review / creating first list  
+
+Review Creation Flow
+
+- User navigates to album page or search album  
+- Click "Write Review" button  
+- Fill star rating + text review form  
+- Submit review  
+- Review appears under album and in trending feed  
+
+Music Tracking Flow
+
+- User marks albums as listened or wants-to-listen (Listen Later)  
+- Marking affects personal stats and recommendations  
+
+Interaction Flow (Comments & Favoriting)
+
+- Users can like albums, reviews, lists  
+- Users can comment on reviews 
+- Users receive notifications for replies and likes  
+- Users can follow other users/artists to receive updates  
+
+List Management Flow
+
+- User creates new list with title and description  
+- Search/select albums to add to list  
+- Reorder albums via drag/drop or controls  
+- Save and share list publicly  
+- Other users can favorite or comment on list  
+
+Discovery Flow
+
+- User browses Popular This Week on homepage  
+- Explore Top 250, Most Popular, New Releases (if available)  
+- Search for new artists or albums  
+- See trending reviews and lists on homepage  
+
+5. Design System Elements
+•	Typography
+•	[ ] Font Family:
+•	[ ] Sans-serif google font such as "Roboto” for readability
+•	[ ] Larger weight serif headings (bold, semibold) for titles ‘Lora’
+•	[ ] Regular/medium for body text
+•	[ ] Font Sizes:
+•	[ ] Headings: h1 ~ 32-40px, h2 ~ 24-30px, h3 ~ 20-24px, h4 ~ 16-18px
+•	[ ] Body text: 14-16px for readability
+•	[ ] Smaller captions and metadata: 12-14px
+•	[ ] Line Height: ~1.4-1.6 for paragraphs
+•	[ ] Colors: #000 or #111 for text on white background, #FFF for text on dark background
+•	Spacing
+•	[ ] Base spacing unit: 8px or 10px
+•	[ ] Margin/padding increments in multiples: 8, 16, 24, 32px, etc.
+•	[ ] Consistent gutters for grid layouts (16 or 24px)
+•	[ ] Generous white space around review text for readability
+•	[ ] Card elements with subtle shadow or border for separation
+•	Iconography
+•	[ ] Use of icons for: headphones, subject (writing), star, reorder, access_time, star rating, favorite, chat/comments, play button
+•	[ ] Simple, minimalist line or filled icons consistent in style (React Icons)
+•	[ ] Hover/focus states for interactive icons
+•	Color Themes
+•	[ ] background: '#010103'
+•	[ ] surface: '#260B2C'
+•	[ ] surface2: '#55194F'
+•	[ ] primary: '#FFFFFF'
+•	[ ] secondary: 'rgba(255, 255, 255, 0.7)'
+•	[ ] accent: '#E8891F'
+•	[ ] accent2: '#D56059'
+•	[ ] error: '#FF4444'
+•	Responsive Design
+•	[ ] Mobile breakpoints: 320px to 768px (single column stack, collapsible nav)
+•	[ ] Tablet: 768px to 1024px (two columns or simplified layout)
+•	[ ] Desktop: 1024px and up (full multi-column grid layouts)
+6. Technical Infrastructure Needed
+•	Frontend
+•	[ ] Framework: React
+•	[ ] State management: React Context API + Zustand (for simpler state)
+•	[ ] CSS framework: Tailwind CSS
+•	[ ] Responsive web design with mobile-first approach
+•	Backend
+•	[ ] Supabase for database and authentication
+•	[ ] Spotify API for music data
+•	[ ] Supabase Edge Functions for:
+•	[ ] Average rating calculation
+•	[ ] Rate limiting (Stretch Goal - Implement Later)
+•	Database
+•	[ ] Supabase PostgreSQL
+•	[ ] Media storage for images (album art, user avatars) - Supabase Storage
+•	Hosting and DevOps
+•	[ ] Netlify for hosting
+•	[ ] SSL certificates for HTTPS
+•	[ ] Scalable backend to handle growing user base and content
+•	[ ] Automated backups and database replication (Supabase)
+•	[ ] Monitoring & logging (Supabase)
