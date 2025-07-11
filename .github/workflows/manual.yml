@@ -1,0 +1,21 @@
+name: Sync Popular Albums
+
+on:
+  schedule:
+    # Runs daily at 00:00 UTC
+    - cron: '0 * * * *'
+  workflow_dispatch: # Allows manual triggering from GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Supabase Edge Function
+        run: |
+          curl -X POST \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+          -H "Content-Type: application/json" \
+          "${{ secrets.SUPABASE_URL }}/functions/v1/sync-popular-albums"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
