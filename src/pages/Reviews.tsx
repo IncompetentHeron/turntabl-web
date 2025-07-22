@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { getReviewsWithFilters, searchUsers } from '../lib/supabase';
 import { useUser } from '../hooks/useUser';
@@ -7,6 +7,7 @@ import ReviewCardUnknown from '../components/ReviewCardUnknown';
 import { IoFunnelOutline, IoSearch, IoCheckmark } from 'react-icons/io5';
 import { useDebounce } from '../hooks/useDebounce';
 import { searchSpotify } from '../lib/spotify';
+import { motion, AnimatePresence } from 'framer-motion';
 
 type SortOption = 'newest' | 'oldest' | 'popular' | 'top_rated' | 'lowest_rated';
 
@@ -17,7 +18,6 @@ export default function GlobalReviews() {
   const queryClient = useQueryClient();
 
   // --- Applied Filter States (trigger data fetching and URL updates) ---
-  const [page, setPage] = useState(1);
   const [appliedSortBy, setAppliedSortBy] = useState<SortOption>(
     (searchParams.get('sortBy') as SortOption) || 'newest'
   );
@@ -75,6 +75,9 @@ export default function GlobalReviews() {
   const userInputRef = useRef<HTMLInputElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
+  // --- Scroll state for dynamic mobile button ---
+  const [isScrolled, setIsScrolled] = useState(false);
+
   // --- Search suggestions queries ---
   const { data: albumSuggestions } = useQuery({
     queryKey: ['albumSuggestions', debouncedAlbumName],
@@ -94,12 +97,18 @@ export default function GlobalReviews() {
     enabled: showUserDropdown && debouncedUsername.length > 1,
   });
 
-  // --- Main reviews query (depends on applied filters) ---
-  const { data: reviews = [], isLoading, error } = useQuery({
+  // --- Infinite reviews query (depends on applied filters) ---
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    error,
+  } = useInfiniteQuery({
     queryKey: [
       'filteredReviews',
       appliedSortBy,
-      page,
       appliedAlbumIdFilter,
       appliedArtistIdFilter,
       appliedUserIdFilter,
@@ -107,10 +116,10 @@ export default function GlobalReviews() {
       appliedReleaseYearFilter,
       appliedReleaseDecadeFilter,
     ],
-    queryFn: () =>
-      getReviewsWithFilters({
+    queryFn: async ({ pageParam = 1 }) => {
+      return getReviewsWithFilters({
         sortBy: appliedSortBy,
-        page,
+        page: pageParam as number,
         limit: 20,
         albumId: appliedAlbumIdFilter,
         artistId: appliedArtistIdFilter,
@@ -118,9 +127,23 @@ export default function GlobalReviews() {
         followedByUserId: appliedFollowedUsersOnly && user ? user.id : null,
         releaseYear: appliedReleaseYearFilter,
         releaseDecade: appliedReleaseDecadeFilter,
-      }),
-    staleTime: 1000 * 60 * 5, // 5 minutes
+      });
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages, lastPageParam) => {
+      if (lastPage.length === 20) {
+        return lastPageParam + 1;
+      }
+      return undefined;
+    },
+    select: (data) => ({
+      ...data,
+      pages: data.pages.flat(), // Flatten the array of arrays into a single array
+    }),
+    staleTime: 1000 * 60 * 5,
   });
+
+  const reviews = data?.pages || [];
 
   // --- Effect to update URL search params when applied filters change ---
   useEffect(() => {
@@ -132,11 +155,10 @@ export default function GlobalReviews() {
     if (appliedFollowedUsersOnly) params.set('followed', 'true');
     if (appliedReleaseYearFilter) params.set('year', appliedReleaseYearFilter.toString());
     if (appliedReleaseDecadeFilter) params.set('decade', appliedReleaseDecadeFilter.toString());
-    params.set('page', page.toString());
+    // Page parameter is removed as it's handled by infinite scroll
     navigate(`?${params.toString()}`, { replace: true });
   }, [
     appliedSortBy,
-    page,
     appliedAlbumIdFilter,
     appliedArtistIdFilter,
     appliedUserIdFilter,
@@ -175,6 +197,20 @@ export default function GlobalReviews() {
     };
   }, []);
 
+  // --- Scroll detection for dynamic mobile button ---
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 50) {
+        setIsScrolled(true);
+      } else {
+        setIsScrolled(false);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   // --- Handlers for filter changes ---
   const handleSortChange = (newSort: SortOption) => {
     setTempSortBy(newSort);
@@ -182,7 +218,7 @@ export default function GlobalReviews() {
 
   const handleApplyFilters = () => {
     setAppliedSortBy(tempSortBy);
-    
+
     // Use selected IDs if available, otherwise clear filters if search inputs are empty
     if (tempAlbumNameSearch.trim() === '') {
       setAppliedAlbumIdFilter(null);
@@ -191,7 +227,7 @@ export default function GlobalReviews() {
     } else {
       setAppliedAlbumIdFilter(selectedAlbumId);
     }
-    
+
     if (tempArtistNameSearch.trim() === '') {
       setAppliedArtistIdFilter(null);
       setSelectedArtistId(null);
@@ -199,7 +235,7 @@ export default function GlobalReviews() {
     } else {
       setAppliedArtistIdFilter(selectedArtistId);
     }
-    
+
     if (tempUsernameSearch.trim() === '') {
       setAppliedUserIdFilter(null);
       setSelectedUserId(null);
@@ -211,25 +247,16 @@ export default function GlobalReviews() {
     setAppliedReleaseYearFilter(tempReleaseYearFilter);
     setAppliedReleaseDecadeFilter(tempReleaseDecadeFilter);
     setAppliedFollowedUsersOnly(tempFollowedUsersOnly);
-    setPage(1); // Reset to first page on filter apply
+
+    // Invalidate and refetch the infinite query from the beginning
+    queryClient.invalidateQueries({ queryKey: ['filteredReviews'] });
     setShowFilters(false); // Close filter panel after applying
   };
 
-  const handleUpdate = () => {
-    queryClient.invalidateQueries({
-      queryKey: [
-        'filteredReviews',
-        appliedSortBy,
-        page,
-        appliedAlbumIdFilter,
-        appliedArtistIdFilter,
-        appliedUserIdFilter,
-        appliedFollowedUsersOnly,
-        appliedReleaseYearFilter,
-        appliedReleaseDecadeFilter,
-      ],
-    });
-  };
+  const handleUpdate = useCallback(() => {
+    // Invalidate the query to refetch the current visible reviews
+    queryClient.invalidateQueries({ queryKey: ['filteredReviews'] });
+  }, [queryClient]);
 
   const getPageTitle = () => {
     switch (appliedSortBy) {
@@ -257,288 +284,561 @@ export default function GlobalReviews() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
         <div>
           <h1 className="text-3xl font-bold mb-2">{getPageTitle()}</h1>
           <p className="text-secondary">Discover what the community is saying about music</p>
         </div>
+      </div>
 
-        {/* Controls */}
-        <div className="flex items-center gap-4">
-          {user && (
-            <button
-              onClick={() => setTempFollowedUsersOnly(!tempFollowedUsersOnly)}
-              className={`btn ${tempFollowedUsersOnly ? 'btn-primary' : 'btn-secondary'} flex items-center gap-2`}
-              disabled={!user}
-            >
-              {tempFollowedUsersOnly ? <IoCheckmark size={20} /> : null}
-              My Community
-            </button>
+      <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-5 gap-6">
+        {/* Reviews List Column */}
+        <div className="md:col-span-3 lg:col-span-4">
+          {isLoading && reviews.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-xl text-secondary">Loading reviews...</div>
+            </div>
+          ) : reviews.length > 0 ? (
+            <>
+              {/* Reviews Feed */}
+              <div className="space-y-4">
+                {reviews.map((review) => (
+                  <ReviewCardUnknown key={review.id} review={review} onUpdate={handleUpdate} />
+                ))}
+              </div>
+
+              {/* Load More Button */}
+              {hasNextPage && (
+                <div className="flex justify-center mt-8">
+                  <button
+                    onClick={() => fetchNextPage()}
+                    disabled={isFetchingNextPage}
+                    className="btn btn-secondary"
+                  >
+                    {isFetchingNextPage ? 'Loading more...' : 'Load More'}
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-12 bg-surface rounded-lg">
+              <h2 className="text-2xl font-bold mb-2">No Reviews Found</h2>
+              <p className="text-secondary mb-4">
+                Be the first to write a review and share your thoughts!
+              </p>
+              <Link to="/search" className="btn btn-primary">
+                Find Albums to Review
+              </Link>
+            </div>
           )}
-          {/* Filters Button */}
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="btn btn-secondary flex items-center gap-2"
-          >
-            <IoFunnelOutline size={20} />
-            Filters
-          </button>
+        </div>
+        {/* Filters Column (Desktop) */}
+        <div className="hidden md:block md:col-span-1 lg:col-span-1 sticky top-16 self-start max-h-[calc(100vh-4rem)] overflow-y-auto pr-4">
+          <div className="bg-surface rounded-lg p-6">
+            <h3 className="text-lg font-bold mb-4">Sort by</h3>
+            <div className="flex flex-wrap gap-2 mb-6">
+              {[
+                { key: 'popular', label: 'Trending' },
+                { key: 'top_rated', label: 'Top Rated' },
+                { key: 'newest', label: 'Latest' },
+                { key: 'oldest', label: 'Oldest' },
+                { key: 'lowest_rated', label: 'Lowest Rated' },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => handleSortChange(key as SortOption)}
+                  className={`px-4 py-2 rounded-lg transition-colors ${
+                    tempSortBy === key
+                      ? 'bg-accent text-white'
+                      : 'bg-surface2 text-secondary hover:text-primary hover:bg-white/5'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <h3 className="text-lg font-bold mb-4">Filter by</h3>
+            <div className="grid grid-cols-1 gap-4">
+              {/* Album Name Search with Dropdown */}
+              <div className="relative">
+                <label htmlFor="albumName" className="block text-sm font-medium mb-2">
+                  Album Name
+                </label>
+                <input
+                  ref={albumInputRef}
+                  type="text"
+                  id="albumName"
+                  value={tempAlbumNameSearch}
+                  onChange={(e) => {
+                    setTempAlbumNameSearch(e.target.value);
+                    setShowAlbumDropdown(true);
+                  }}
+                  onFocus={() => setShowAlbumDropdown(true)}
+                  className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
+                  placeholder="e.g., The Dark Side of the Moon"
+                />
+                <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
+                {showAlbumDropdown && debouncedAlbumName.length > 1 && albumSuggestions?.albums?.length > 0 && (
+                  <div ref={albumDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {albumSuggestions.albums.slice(0, 5).map((album) => (
+                      <div
+                        key={album.id}
+                        className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
+                        onClick={() => {
+                          setTempAlbumNameSearch(album.name);
+                          setSelectedAlbumId(album.id);
+                          setSelectedAlbumName(album.name);
+                          setShowAlbumDropdown(false);
+                        }}
+                      >
+                        <img src={album.coverUrl} alt={album.name} className="w-8 h-8 rounded object-cover" />
+                        <div>
+                          <div className="font-medium">{album.name}</div>
+                          <div className="text-sm text-secondary">{album.artist}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Artist Name Search with Dropdown */}
+              <div className="relative">
+                <label htmlFor="artistName" className="block text-sm font-medium mb-2">
+                  Artist Name
+                </label>
+                <input
+                  ref={artistInputRef}
+                  type="text"
+                  id="artistName"
+                  value={tempArtistNameSearch}
+                  onChange={(e) => {
+                    setTempArtistNameSearch(e.target.value);
+                    setShowArtistDropdown(true);
+                  }}
+                  onFocus={() => setShowArtistDropdown(true)}
+                  className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
+                  placeholder="e.g., Pink Floyd"
+                />
+                <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
+                {showArtistDropdown && debouncedArtistName.length > 1 && artistSuggestions?.artists?.length > 0 && (
+                  <div ref={artistDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {artistSuggestions.artists.slice(0, 5).map((artist) => (
+                      <div
+                        key={artist.id}
+                        className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
+                        onClick={() => {
+                          setTempArtistNameSearch(artist.name);
+                          setSelectedArtistId(artist.id);
+                          setSelectedArtistName(artist.name);
+                          setShowArtistDropdown(false);
+                        }}
+                      >
+                        <img src={artist.imageUrl} alt={artist.name} className="w-8 h-8 rounded-full object-cover" />
+                        <div>
+                          <div className="font-medium">{artist.name}</div>
+                          <div className="text-sm text-secondary">Artist</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Username Search with Dropdown */}
+              <div className="relative">
+                <label htmlFor="username" className="block text-sm font-medium mb-2">
+                  Username
+                </label>
+                <input
+                  ref={userInputRef}
+                  type="text"
+                  id="username"
+                  value={tempUsernameSearch}
+                  onChange={(e) => {
+                    setTempUsernameSearch(e.target.value);
+                    setShowUserDropdown(true);
+                  }}
+                  onFocus={() => setShowUserDropdown(true)}
+                  className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
+                  placeholder="e.g., musiclover123"
+                />
+                <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
+                {showUserDropdown && debouncedUsername.length > 1 && userSuggestions?.length > 0 && (
+                  <div ref={userDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {userSuggestions.slice(0, 5).map((userProfile) => (
+                      <div
+                        key={userProfile.id}
+                        className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
+                        onClick={() => {
+                          setTempUsernameSearch(userProfile.username);
+                          setSelectedUserId(userProfile.id);
+                          setSelectedUserName(userProfile.username);
+                          setShowUserDropdown(false);
+                        }}
+                      >
+                        <img src={userProfile.avatar_url || 'https://via.placeholder.com/300'} alt={userProfile.username} className="w-8 h-8 rounded-full object-cover" />
+                        <div>
+                          <div className="font-medium">{userProfile.display_name || userProfile.username}</div>
+                          <div className="text-sm text-secondary">@{userProfile.username}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="releaseYear" className="block text-sm font-medium mb-2">
+                  Release Year
+                </label>
+                <input
+                  type="number"
+                  id="releaseYear"
+                  value={tempReleaseYearFilter || ''}
+                  onChange={(e) => {
+                    setTempReleaseYearFilter(e.target.value ? parseInt(e.target.value) : null);
+                  }}
+                  className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg"
+                  placeholder="e.g., 2023"
+                  min="1900"
+                  max={new Date().getFullYear()}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="releaseDecade" className="block text-sm font-medium mb-2">
+                  Release Decade
+                </label>
+                <input
+                  type="number"
+                  id="releaseDecade"
+                  value={tempReleaseDecadeFilter || ''}
+                  onChange={(e) => {
+                    setTempReleaseDecadeFilter(e.target.value ? parseInt(e.target.value) : null);
+                  }}
+                  className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg"
+                  placeholder="e.g., 2020 (for 2020s)"
+                  step="10"
+                  min="1900"
+                  max={Math.floor(new Date().getFullYear() / 10) * 10}
+                />
+              </div>
+              <div className="col-span-full">
+                {user && (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={tempFollowedUsersOnly}
+                      onChange={() => setTempFollowedUsersOnly(!tempFollowedUsersOnly)}
+                      className="form-checkbox h-5 w-5 text-accent rounded"
+                    />
+                    <span className="text-sm font-medium">Show reviews from users I follow</span>
+                  </label>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={handleApplyFilters}
+                className="btn btn-primary"
+              >
+                Apply Filters
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Filters Panel */}
-      {showFilters && (
-        <div className="bg-surface rounded-lg p-6 mb-8">
-          <h3 className="text-lg font-bold mb-4">Sort by</h3>
-          <div className="flex flex-wrap gap-2 mb-6">
-            {[
-              { key: 'popular', label: 'Trending' },
-              { key: 'top_rated', label: 'Top Rated' },
-              { key: 'newest', label: 'Latest' },
-              { key: 'oldest', label: 'Oldest' },
-              { key: 'lowest_rated', label: 'Lowest Rated' },
-            ].map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => handleSortChange(key as SortOption)}
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  tempSortBy === key
-                    ? 'bg-accent text-white'
-                    : 'bg-surface2 text-secondary hover:text-primary hover:bg-white/5'
-                }`}
+      {/* Mobile Filter Button */}
+      <div className="md:hidden fixed bottom-4 right-4 z-40">
+        <motion.button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`btn btn-primary flex items-center justify-center transition-all duration-300 ${
+            isScrolled ? 'w-12 h-12 rounded-full p-0' : 'px-6 py-3 rounded-lg'
+          }`}
+          initial={false}
+          animate={{
+            width: isScrolled ? 48 : 'auto',
+            height: isScrolled ? 48 : 'auto',
+            padding: isScrolled ? '0px' : '12px 24px',
+            borderRadius: isScrolled ? '9999px' : '8px',
+          }}
+          transition={{ duration: 0.3 }}
+        >
+          <AnimatePresence mode="wait">
+            {isScrolled ? (
+              <motion.div
+                key="icon"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ duration: 0.2 }}
               >
-                {label}
-              </button>
-            ))}
-          </div>
+                <IoFunnelOutline size={24} />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="text"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center gap-2"
+              >
+                <IoFunnelOutline size={20} />
+                Filters
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.button>
+      </div>
 
-          <h3 className="text-lg font-bold mb-4">Filter by</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Album Name Search with Dropdown */}
-            <div className="relative">
-              <label htmlFor="albumName" className="block text-sm font-medium mb-2">
-                Album Name
-              </label>
-              <input
-                ref={albumInputRef}
-                type="text"
-                id="albumName"
-                value={tempAlbumNameSearch}
-                onChange={(e) => {
-                  setTempAlbumNameSearch(e.target.value);
-                  setShowAlbumDropdown(true);
-                }}
-                onFocus={() => setShowAlbumDropdown(true)}
-                className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
-                placeholder="e.g., The Dark Side of the Moon"
-              />
-              <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
-              {showAlbumDropdown && debouncedAlbumName.length > 1 && albumSuggestions?.albums?.length > 0 && (
-                <div ref={albumDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {albumSuggestions.albums.slice(0, 5).map((album) => (
-                    <div
-                      key={album.id}
-                      className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
-                      onClick={() => {
-                        setTempAlbumNameSearch(album.name);
-                        setSelectedAlbumId(album.id);
-                        setSelectedAlbumName(album.name);
-                        setShowAlbumDropdown(false);
-                      }}
-                    >
-                      <img src={album.coverUrl} alt={album.name} className="w-8 h-8 rounded object-cover" />
-                      <div>
-                        <div className="font-medium">{album.name}</div>
-                        <div className="text-sm text-secondary">{album.artist}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Artist Name Search with Dropdown */}
-            <div className="relative">
-              <label htmlFor="artistName" className="block text-sm font-medium mb-2">
-                Artist Name
-              </label>
-              <input
-                ref={artistInputRef}
-                type="text"
-                id="artistName"
-                value={tempArtistNameSearch}
-                onChange={(e) => {
-                  setTempArtistNameSearch(e.target.value);
-                  setShowArtistDropdown(true);
-                }}
-                onFocus={() => setShowArtistDropdown(true)}
-                className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
-                placeholder="e.g., Pink Floyd"
-              />
-              <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
-              {showArtistDropdown && debouncedArtistName.length > 1 && artistSuggestions?.artists?.length > 0 && (
-                <div ref={artistDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {artistSuggestions.artists.slice(0, 5).map((artist) => (
-                    <div
-                      key={artist.id}
-                      className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
-                      onClick={() => {
-                        setTempArtistNameSearch(artist.name);
-                        setSelectedArtistId(artist.id);
-                        setSelectedArtistName(artist.name);
-                        setShowArtistDropdown(false);
-                      }}
-                    >
-                      <img src={artist.imageUrl} alt={artist.name} className="w-8 h-8 rounded-full object-cover" />
-                      <div>
-                        <div className="font-medium">{artist.name}</div>
-                        <div className="text-sm text-secondary">Artist</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Username Search with Dropdown */}
-            <div className="relative">
-              <label htmlFor="username" className="block text-sm font-medium mb-2">
-                Username
-              </label>
-              <input
-                ref={userInputRef}
-                type="text"
-                id="username"
-                value={tempUsernameSearch}
-                onChange={(e) => {
-                  setTempUsernameSearch(e.target.value);
-                  setShowUserDropdown(true);
-                }}
-                onFocus={() => setShowUserDropdown(true)}
-                className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
-                placeholder="e.g., musiclover123"
-              />
-              <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
-              {showUserDropdown && debouncedUsername.length > 1 && userSuggestions?.length > 0 && (
-                <div ref={userDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {userSuggestions.slice(0, 5).map((userProfile) => (
-                    <div
-                      key={userProfile.id}
-                      className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
-                      onClick={() => {
-                        setTempUsernameSearch(userProfile.username);
-                        setSelectedUserId(userProfile.id);
-                        setSelectedUserName(userProfile.username);
-                        setShowUserDropdown(false);
-                      }}
-                    >
-                      <img src={userProfile.avatar_url || 'https://via.placeholder.com/300'} alt={userProfile.username} className="w-8 h-8 rounded-full object-cover" />
-                      <div>
-                        <div className="font-medium">{userProfile.display_name || userProfile.username}</div>
-                        <div className="text-sm text-secondary">@{userProfile.username}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label htmlFor="releaseYear" className="block text-sm font-medium mb-2">
-                Release Year
-              </label>
-              <input
-                type="number"
-                id="releaseYear"
-                value={tempReleaseYearFilter || ''}
-                onChange={(e) => {
-                  setTempReleaseYearFilter(e.target.value ? parseInt(e.target.value) : null);
-                }}
-                className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg"
-                placeholder="e.g., 2023"
-                min="1900"
-                max={new Date().getFullYear()}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="releaseDecade" className="block text-sm font-medium mb-2">
-                Release Decade
-              </label>
-              <input
-                type="number"
-                id="releaseDecade"
-                value={tempReleaseDecadeFilter || ''}
-                onChange={(e) => {
-                  setTempReleaseDecadeFilter(e.target.value ? parseInt(e.target.value) : null);
-                }}
-                className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg"
-                placeholder="e.g., 2020 (for 2020s)"
-                step="10"
-                min="1900"
-                max={Math.floor(new Date().getFullYear() / 10) * 10}
-              />
-            </div>
-          </div>
-          <div className="flex justify-end mt-6">
-            <button
-              onClick={handleApplyFilters}
-              className="btn btn-primary"
+      {/* Mobile Filters Panel Overlay */}
+      <AnimatePresence>
+        {showFilters && (
+          <motion.div
+            className="md:hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <motion.div
+              className="bg-surface rounded-lg p-6 m-4 w-full max-w-md max-h-[90vh] overflow-y-auto"
+              initial={{ y: '100vh' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100vh' }}
+              transition={{ type: 'spring', damping: 20, stiffness: 100 }}
             >
-              Apply Filters
-            </button>
-          </div>
-        </div>
-      )}
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold">Filters</h2>
+                <button
+                  onClick={() => setShowFilters(false)}
+                  className="text-secondary hover:text-primary"
+                >
+                  ✕
+                </button>
+              </div>
+              <h3 className="text-lg font-bold mb-4">Sort by</h3>
+              <div className="flex flex-wrap gap-2 mb-6">
+                {[
+                  { key: 'popular', label: 'Trending' },
+                  { key: 'top_rated', label: 'Top Rated' },
+                  { key: 'newest', label: 'Latest' },
+                  { key: 'oldest', label: 'Oldest' },
+                  { key: 'lowest_rated', label: 'Lowest Rated' },
+                ].map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => handleSortChange(key as SortOption)}
+                    className={`px-4 py-2 rounded-lg transition-colors ${
+                      tempSortBy === key
+                        ? 'bg-accent text-white'
+                        : 'bg-surface2 text-secondary hover:text-primary hover:bg-white/5'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
-      {/* Loading State */}
-      {isLoading ? (
-        <div className="text-center py-12">
-          <div className="text-xl text-secondary">Loading reviews...</div>
-        </div>
-      ) : reviews.length > 0 ? (
-        <>
-          {/* Reviews Feed */}
-          <div className="space-y-4">
-            {reviews.map((review) => (
-              <ReviewCardUnknown key={review.id} review={review} onUpdate={handleUpdate} />
-            ))}
-          </div>
+              <h3 className="text-lg font-bold mb-4">Filter by</h3>
+              <div className="grid grid-cols-1 gap-4">
+                {/* Album Name Search with Dropdown */}
+                <div className="relative">
+                  <label htmlFor="albumName" className="block text-sm font-medium mb-2">
+                    Album Name
+                  </label>
+                  <input
+                    ref={albumInputRef}
+                    type="text"
+                    id="albumName"
+                    value={tempAlbumNameSearch}
+                    onChange={(e) => {
+                      setTempAlbumNameSearch(e.target.value);
+                      setShowAlbumDropdown(true);
+                    }}
+                    onFocus={() => setShowAlbumDropdown(true)}
+                    className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
+                    placeholder="e.g., The Dark Side of the Moon"
+                  />
+                  <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
+                  {showAlbumDropdown && debouncedAlbumName.length > 1 && albumSuggestions?.albums?.length > 0 && (
+                    <div ref={albumDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {albumSuggestions.albums.slice(0, 5).map((album) => (
+                        <div
+                          key={album.id}
+                          className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
+                          onClick={() => {
+                            setTempAlbumNameSearch(album.name);
+                            setSelectedAlbumId(album.id);
+                            setSelectedAlbumName(album.name);
+                            setShowAlbumDropdown(false);
+                          }}
+                        >
+                          <img src={album.coverUrl} alt={album.name} className="w-8 h-8 rounded object-cover" />
+                          <div>
+                            <div className="font-medium">{album.name}</div>
+                            <div className="text-sm text-secondary">{album.artist}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-          {/* Pagination */}
-          {reviews.length === 20 && (
-            <div className="flex justify-center gap-2 mt-8">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="btn btn-secondary disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="flex items-center px-4 py-2">Page {page}</span>
-              <button
-                onClick={() => setPage((p) => p + 1)}
-                disabled={reviews.length < 20}
-                className="btn btn-secondary disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="text-center py-12 bg-surface rounded-lg">
-          <h2 className="text-2xl font-bold mb-2">No Reviews Found</h2>
-          <p className="text-secondary mb-4">
-            Be the first to write a review and share your thoughts!
-          </p>
-          <Link to="/search" className="btn btn-primary">
-            Find Albums to Review
-          </Link>
-        </div>
-      )}
+                {/* Artist Name Search with Dropdown */}
+                <div className="relative">
+                  <label htmlFor="artistName" className="block text-sm font-medium mb-2">
+                    Artist Name
+                  </label>
+                  <input
+                    ref={artistInputRef}
+                    type="text"
+                    id="artistName"
+                    value={tempArtistNameSearch}
+                    onChange={(e) => {
+                      setTempArtistNameSearch(e.target.value);
+                      setShowArtistDropdown(true);
+                    }}
+                    onFocus={() => setShowArtistDropdown(true)}
+                    className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
+                    placeholder="e.g., Pink Floyd"
+                  />
+                  <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
+                  {showArtistDropdown && debouncedArtistName.length > 1 && artistSuggestions?.artists?.length > 0 && (
+                    <div ref={artistDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {artistSuggestions.artists.slice(0, 5).map((artist) => (
+                        <div
+                          key={artist.id}
+                          className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
+                          onClick={() => {
+                            setTempArtistNameSearch(artist.name);
+                            setSelectedArtistId(artist.id);
+                            setSelectedArtistName(artist.name);
+                            setShowArtistDropdown(false);
+                          }}
+                        >
+                          <img src={artist.imageUrl} alt={artist.name} className="w-8 h-8 rounded-full object-cover" />
+                          <div>
+                            <div className="font-medium">{artist.name}</div>
+                            <div className="text-sm text-secondary">Artist</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Username Search with Dropdown */}
+                <div className="relative">
+                  <label htmlFor="username" className="block text-sm font-medium mb-2">
+                    Username
+                  </label>
+                  <input
+                    ref={userInputRef}
+                    type="text"
+                    id="username"
+                    value={tempUsernameSearch}
+                    onChange={(e) => {
+                      setTempUsernameSearch(e.target.value);
+                      setShowUserDropdown(true);
+                    }}
+                    onFocus={() => setShowUserDropdown(true)}
+                    className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg pr-10"
+                    placeholder="e.g., musiclover123"
+                  />
+                  <IoSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary" />
+                  {showUserDropdown && debouncedUsername.length > 1 && userSuggestions?.length > 0 && (
+                    <div ref={userDropdownRef} className="absolute z-10 w-full mt-1 bg-surface border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {userSuggestions.slice(0, 5).map((userProfile) => (
+                        <div
+                          key={userProfile.id}
+                          className="flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer"
+                          onClick={() => {
+                            setTempUsernameSearch(userProfile.username);
+                            setSelectedUserId(userProfile.id);
+                            setSelectedUserName(userProfile.username);
+                            setShowUserDropdown(false);
+                          }}
+                        >
+                          <img src={userProfile.avatar_url || 'https://via.placeholder.com/300'} alt={userProfile.username} className="w-8 h-8 rounded-full object-cover" />
+                          <div>
+                            <div className="font-medium">{userProfile.display_name || userProfile.username}</div>
+                            <div className="text-sm text-secondary">@{userProfile.username}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="releaseYear" className="block text-sm font-medium mb-2">
+                    Release Year
+                  </label>
+                  <input
+                    type="number"
+                    id="releaseYear"
+                    value={tempReleaseYearFilter || ''}
+                    onChange={(e) => {
+                      setTempReleaseYearFilter(e.target.value ? parseInt(e.target.value) : null);
+                    }}
+                    className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg"
+                    placeholder="e.g., 2023"
+                    min="1900"
+                    max={new Date().getFullYear()}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="releaseDecade" className="block text-sm font-medium mb-2">
+                    Release Decade
+                  </label>
+                  <input
+                    type="number"
+                    id="releaseDecade"
+                    value={tempReleaseDecadeFilter || ''}
+                    onChange={(e) => {
+                      setTempReleaseDecadeFilter(e.target.value ? parseInt(e.target.value) : null);
+                    }}
+                    className="w-full px-4 py-2 bg-background border border-white/10 rounded-lg"
+                    placeholder="e.g., 2020 (for 2020s)"
+                    step="10"
+                    min="1900"
+                    max={Math.floor(new Date().getFullYear() / 10) * 10}
+                  />
+                </div>
+                <div className="col-span-full">
+                  {user && (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={tempFollowedUsersOnly}
+                        onChange={() => setTempFollowedUsersOnly(!tempFollowedUsersOnly)}
+                        className="form-checkbox h-5 w-5 text-accent rounded"
+                      />
+                      <span className="text-sm font-medium">Show reviews from users I follow</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-end mt-6">
+                <button
+                  onClick={handleApplyFilters}
+                  className="btn btn-primary"
+                >
+                  Apply Filters
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

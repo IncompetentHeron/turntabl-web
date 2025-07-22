@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  useQuery,
+  useMutation,
+  useQueryClient
+} from '@tanstack/react-query';
 import {
   DndContext,
   closestCenter,
@@ -50,14 +54,15 @@ import { searchSpotify, generateSlug } from '../lib/spotify';
 import { useUser } from '../hooks/useUser';
 import { useDebounce } from '../hooks/useDebounce';
 import Avatar from '../components/Avatar';
+import { ToastOptions } from '../hooks/useToast'; // Import ToastOptions
 import { format } from 'date-fns';
 
 interface SortableItemProps {
-  id: string; // This is the unique list_item ID
+  id: string;
   index: number;
   item: any;
   isOwner: boolean;
-  onRemove: (listItemId: string) => void; // Updated to pass listItemId
+  onRemove: (listItemId: string) => void;
 }
 
 function SortableItem({ id, index, item, isOwner, onRemove }: SortableItemProps) {
@@ -92,7 +97,7 @@ function SortableItem({ id, index, item, isOwner, onRemove }: SortableItemProps)
   return (
     <div
       ref={setNodeRef}
-      style={{ ...style, touchAction: 'none' }}
+      style={style}
       className="group bg-surface/50 hover:bg-surface transition-colors duration-200 rounded-md"
     >
       <div className="flex items-center gap-3 p-2">
@@ -100,6 +105,7 @@ function SortableItem({ id, index, item, isOwner, onRemove }: SortableItemProps)
           <button
             className="text-secondary cursor-grab transition-opacity"
             {...attributes}
+            style={{ touchAction: 'none' }}
             {...listeners}
           >
             <IoReorderThreeOutline size={24} />
@@ -180,7 +186,11 @@ function SortableItem({ id, index, item, isOwner, onRemove }: SortableItemProps)
   );
 }
 
-function ListDetails() {
+interface ListDetailsProps {
+  showToast: (options: ToastOptions) => void; // Add showToast prop
+}
+
+function ListDetails({ showToast }: ListDetailsProps) {
   const { id } = useParams<{ id: string }>();
   const { user } = useUser();
   const navigate = useNavigate();
@@ -204,16 +214,13 @@ function ListDetails() {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
     useSensor(TouchSensor, {
-      // Adjust touch activation constraints if needed
       activationConstraint: {
-        delay: 100, 
-        tolerance: 5,
+        distance: 10, // Require 10px movement before drag starts
       },
     }),
     useSensor(MouseSensor, {
-      // Adjust mouse activation constraints if needed
       activationConstraint: {
-        distance: 10, // Drag distance to activate drag
+        distance: 8, // Require 8px movement before drag starts
       },
     }),
   );
@@ -274,13 +281,13 @@ function ListDetails() {
   });
 
   const updateItemMutation = useMutation({
-    mutationFn: (params: { listId: string; albumId?: string; artistId?: string; rank: number }) =>
-      updateListItem(params.listId, params.albumId, params.artistId, { rank: params.rank }),
+    mutationFn: (params: { listItemId: string; rank: number }) => // Changed mutationFn params
+      updateListItem(params.listItemId, { rank: params.rank }), // Pass listItemId
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['list', id] });
     },
   });
-
+  
   const removeItemMutation = useMutation({
     mutationFn: (listItemId: string) => // Updated to accept listItemId
       removeFromList(listItemId), // Call removeFromList with listItemId
@@ -294,6 +301,7 @@ function ListDetails() {
       addToList(params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['list', id] });
+      showToast({ title: 'Item Added!', description: 'The item has been successfully added to your list.' });
     },
   });
 
@@ -335,9 +343,7 @@ function ListDetails() {
         await Promise.all(
           newItems.map((item, index) =>
             updateItemMutation.mutateAsync({
-              listId: list.id,
-              albumId: item.album_id,
-              artistId: item.artist_id,
+              listItemId: item.id, // Pass the unique list item ID
               rank: index + 1,
             })
           )

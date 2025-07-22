@@ -1,5 +1,4 @@
 // src/lib/supabase.ts
-
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -7,8 +6,6 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Types
-// Types
 export interface Profile {
   id: string;
   username: string;
@@ -26,6 +23,17 @@ export interface Profile {
   is_followed_by_user?: boolean;
   followers_count?: number;
   review_count?: number;
+}
+
+// New Artist interface
+export interface Artist {
+  id: string;
+  name: string;
+  imageUrl: string | null; // Mapped from image_url
+  spotifyUrl: string | null; // Mapped from spotify_url
+  genres: string[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Review {
@@ -54,6 +62,7 @@ export interface Review {
     coverUrl?: string;
   };
   review_comments?: ReviewComment[];
+  moderation_status?: string; // ADDED: Moderation status
 }
 
 export interface ReviewComment {
@@ -67,6 +76,7 @@ export interface ReviewComment {
   like_count?: number;
   is_liked?: boolean;
   profile?: Profile;
+  moderation_status?: string; // ADDED: Moderation status
 }
 
 export interface List {
@@ -144,11 +154,21 @@ export interface Album {
   average_rating?: number;
   weighted_average_rating?: number;
   coverUrl?: string;
-  popularity?: number; 
+  popularity?: number;
   spotify_popularity?: number;
+  like_count?: number;
+  turntabl_popularity?: number;
+  tracks?: Track[];
 }
 
-// Auth functions
+export interface SuggestedProfile extends Profile {
+  mutual_followers_count: number;
+  first_mutual_follower_id: string | null;
+  first_mutual_follower_username: string | null;
+  first_mutual_follower_display_name: string | null;
+}
+
+
 export async function signUp(email: string, password: string, username: string) {
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -241,7 +261,7 @@ export async function searchUsers(query: string): Promise<Profile[]> {
 
 export async function getAllUsers(page: number = 1, limit: number = 20): Promise<Profile[]> {
   const offset = (page - 1) * limit;
-  
+
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
@@ -327,6 +347,9 @@ export async function createReview(review: {
 }
 
 export async function getUserReviews(userId: string): Promise<Review[]> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const currentUserId = session?.user?.id;
+
   const { data, error } = await supabase
     .from('reviews')
     .select(`
@@ -342,6 +365,7 @@ export async function getUserReviews(userId: string): Promise<Review[]> {
     .order('created_at', { ascending: false });
 
   if (error) throw error;
+
   return data?.map(review => ({
     ...review,
     album: review.album ? {
@@ -777,23 +801,15 @@ export async function updateList(listId: string, updates: { title: string; descr
 }
 
 export async function updateListItem(
-  listId: string,
-  albumId?: string,
-  artistId?: string,
+  listItemId: string, // Changed to accept listItemId directly
   updates: { rank?: number; note?: string }
 ) {
-  let query = supabase
+  const { data, error } = await supabase
     .from('list_items')
     .update(updates)
-    .eq('list_id', listId);
-
-  if (albumId) {
-    query = query.eq('album_id', albumId);
-  } else if (artistId) {
-    query = query.eq('artist_id', artistId);
-  }
-
-  const { data, error } = await query.select().single();
+    .eq('id', listItemId) // Update by the unique list_item ID
+    .select()
+    .single();
 
   if (error) throw error;
   return data;
@@ -1155,7 +1171,7 @@ export async function getLastListen(userId: string, albumId: string) {
     .eq('album_id', albumId)
     .order('listened_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (error && error.code !== 'PGRST116') throw error;
   return data;
@@ -1308,4 +1324,175 @@ export async function deleteReviewDraft(albumId: string) {
     .eq('album_id', albumId);
 
   if (error) throw error;
+}
+
+export async function getFollowSuggestions(limit: number = 10): Promise<SuggestedProfile[]> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return [];
+
+  const { data, error } = await supabase.rpc('get_follow_suggestions', {
+    p_user_id: session.user.id,
+    p_limit: limit,
+  });
+
+  if (error) {
+    console.error('Error fetching follow suggestions:', error);
+    throw error;
+  }
+  return data || [];
+}
+
+export async function dismissSuggestion(suggestedProfileId: string) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error('Not authenticated');
+
+  const { error } = await supabase
+    .from('dismissed_suggestions')
+    .insert({
+      user_id: session.user.id,
+      suggested_profile_id: suggestedProfileId,
+    });
+
+  if (error) {
+    console.error('Error dismissing suggestion:', error);
+    throw error;
+  }
+}
+
+export async function submitBugReport(userId: string | null, title: string, description: string) {
+  const { error } = await supabase
+    .from('bug_reports')
+    .insert({
+      user_id: userId,
+      title,
+      description,
+    });
+
+  if (error) {
+    console.error('Error submitting bug report:', error);
+    throw error;
+  }
+}
+
+export async function submitGeneralFeedback(userId: string | null, feedbackText: string) {
+  const { error } = await supabase
+    .from('general_feedback')
+    .insert({
+      user_id: userId,
+      feedback_text: feedbackText,
+    });
+
+  if (error) {
+    console.error('Error submitting general feedback:', error);
+    throw error;
+  }
+}
+
+export async function getOurPopularAlbums(limit: number = 10): Promise<Album[]> {
+  const { data, error } = await supabase.rpc('get_our_popular_albums', {
+    p_limit: limit,
+  });
+
+  if (error) {
+    console.error('Error fetching our popular albums:', error);
+    throw error;
+  }
+
+  return data.map((album: any) => ({
+    ...album,
+    coverUrl: album.cover_url,
+  }));
+}
+
+export async function getSupabaseAlbum(albumId: string): Promise<Album | null> {
+  const { data, error } = await supabase
+    .from('albums')
+    .select('*')
+    .eq('id', albumId)
+    .single();
+
+  if (error) {
+    if (error.code !== 'PGRST116') { // PGRST116 means no rows found
+      console.error('Error fetching album from Supabase:', error); // Keep logging for other errors
+      throw error;
+    }
+    // For PGRST116, we don't throw and return null, so no need to log as an error.
+    // The query will proceed to fetch from Spotify.
+    return null;
+  }
+  // MODIFIED: Explicitly map spotify_url to spotifyUrl
+  return data ? {
+    ...data,
+    coverUrl: data.cover_url,
+    spotifyUrl: data.spotify_url // Add this line
+  } : null;
+}
+
+// Updated getSupabaseArtist to return Artist type
+export async function getSupabaseArtist(artistId: string): Promise<Artist | null> {
+  const { data, error } = await supabase
+    .from('artists')
+    .select('*')
+    .eq('id', artistId)
+    .single();
+
+  if (error) {
+    if (error.code !== 'PGRST116') { // PGRST116 means no rows found
+      console.error('Error fetching artist from Supabase:', error); // Keep logging for other errors
+      throw error;
+    }
+    // For PGRST116, we don't throw and return null.
+    return null;
+  }
+  // Map database column names to frontend-friendly property names
+  return data ? {
+    id: data.id,
+    name: data.name,
+    imageUrl: data.image_url,
+    spotifyUrl: data.spotify_url,
+    genres: data.genres,
+    created_at: data.created_at,
+    updated_at: data.updated_at,
+  } : null;
+}
+
+export async function getSupabaseArtistAlbums(artistId: string): Promise<Album[]> {
+  const { data, error } = await supabase
+    .from('albums')
+    .select('*')
+    .eq('artist_id', artistId)
+    .order('release_date', { ascending: false }); // Order by release date for discography
+
+  if (error) {
+    console.error('Error fetching artist albums from Supabase:', error);
+    throw error;
+  }
+  return data ? data.map(album => ({ ...album, coverUrl: album.cover_url })) : [];
+}
+
+// ADDED: New function to report content
+export async function reportContent(contentType: 'review' | 'comment', contentId: string, reason: string) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error('Not authenticated');
+
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/report-content`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      reported_content_type: contentType,
+      reported_content_id: contentId,
+      reason,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    console.error('Error reporting content:', errorData);
+    throw new Error(errorData.error || 'Failed to report content');
+  }
+
+  return response.json();
 }

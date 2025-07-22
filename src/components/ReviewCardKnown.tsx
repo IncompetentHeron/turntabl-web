@@ -7,7 +7,9 @@ import type { Review, ReviewComment } from '../lib/supabase';
 import Avatar from './Avatar';
 import CommentFeed from './CommentFeed';
 import StarRating from './StarRating'
-import { IoTrashOutline, IoHeart, IoHeartOutline, IoChatbox, IoChatboxOutline, IoReload } from 'react-icons/io5';
+import { IoTrashOutline, IoHeart, IoHeartOutline, IoChatbox, IoChatboxOutline, IoReload, IoFlagOutline } from 'react-icons/io5'; // ADDED: IoFlagOutline
+import ReportContentModal from './ReportContentModal'; // ADDED: Import ReportContentModal
+import { useToast } from '../hooks/useToast'; // ADDED: Import useToast
 
 interface ReviewCardKnownProps {
   review: Review;
@@ -22,7 +24,9 @@ export default function ReviewCardKnown({ review, onUpdate, onDelete }: ReviewCa
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isLiking, setIsLiking] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false); // ADDED: State for report modal
   const contentRef = useRef<HTMLDivElement>(null);
+  const { showToast } = useToast(); // ADDED: Initialize useToast
 
   useEffect(() => {
     if (contentRef.current) {
@@ -72,6 +76,30 @@ export default function ReviewCardKnown({ review, onUpdate, onDelete }: ReviewCa
     onDelete(review.id);
     setShowDeleteConfirm(false);
   };
+
+  // ADDED: Function to handle reporting
+  const handleReport = () => {
+    if (!user) {
+      showToast({ title: 'Not Authenticated', description: 'Please log in to report content.' });
+      return;
+    }
+    setShowReportModal(true);
+  };
+
+  // ADDED: Conditional rendering based on moderation_status
+  const isModerated = review.moderation_status === 'pending_review' || review.moderation_status === 'rejected';
+  const isOwner = user?.id === review.user_id;
+
+  if (isModerated && !isOwner) {
+    return (
+      <div className="xl:bg-surface overflow-hidden border-t border-accent2/80 mx-[-1rem]">
+        <div className="p-4 pt-3 pb-3 md:p-6 text-center text-secondary">
+          <p className="font-bold mb-2">This content is currently under review.</p>
+          <p className="text-sm">It will be visible again once approved by a moderator.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="xl:bg-surface overflow-hidden border-t border-accent2/80 mx-[-1rem]">
@@ -175,12 +203,20 @@ export default function ReviewCardKnown({ review, onUpdate, onDelete }: ReviewCa
             )}
             <span className="text-white text-lg">{review.review_comments?.length || 0}</span>
           </button>
-          {user?.id === review.user_id && (
+          {user?.id === review.user_id ? ( // ADDED: Conditional rendering for owner vs. reporter
             <button
               onClick={() => setShowDeleteConfirm(true)}
               className="flex items-center justify-center w-8 h-8 rounded-full text-white hover:text-error transition-colors ml-auto"
             >
               <IoTrashOutline size={25} />
+            </button>
+          ) : (
+            <button
+              onClick={handleReport}
+              className="flex items-center justify-center w-8 h-8 rounded-full text-white hover:text-secondary transition-colors ml-auto"
+              title="Report content"
+            >
+              <IoFlagOutline size={25} />
             </button>
           )}
         </div>
@@ -219,6 +255,16 @@ export default function ReviewCardKnown({ review, onUpdate, onDelete }: ReviewCa
             onLike={handleLike}
           />
         </div>
+      )}
+
+      {showReportModal && ( // ADDED: ReportContentModal
+        <ReportContentModal
+          contentType="review"
+          contentId={review.id}
+          onClose={() => setShowReportModal(false)}
+          onSuccess={onUpdate} // Refresh reviews after reporting
+          showToast={showToast}
+        />
       )}
     </div>
   );

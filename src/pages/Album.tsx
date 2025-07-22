@@ -13,8 +13,9 @@ import {
   toggleListenLater,
   getLastListen,
   isInListenLater,
+  getSupabaseAlbum,
 } from '../lib/supabase';
-import { getAlbum, getArtist } from '../lib/spotify'; 
+import { getAlbum as getSpotifyAlbum, getArtist, getArtistProfile } from '../lib/spotify'; // MODIFIED
 import { useUser } from '../hooks/useUser';
 import ReviewModal from '../components/ReviewModal';
 import ReviewCardKnown from '../components/ReviewCardKnown';
@@ -22,13 +23,18 @@ import RatingDistributionChart from '../components/RatingDistributionChart';
 import ListenModal from '../components/ListenModal';
 import AddToListModal from '../components/AddToListModal';
 import AuthModal from '../components/Auth';
-import Avatar from '../components/Avatar'; 
+import Avatar from '../components/Avatar';
 import ListCard from '../components/ListCard';
 import SimilarAlbums from '../components/SimilarAlbums';
 import { IoHeart, IoHeadset, IoAdd, IoCheckmark } from 'react-icons/io5';
 import { MdFormatListBulletedAdd } from 'react-icons/md';
+import { ToastOptions } from '../hooks/useToast'; // Import ToastOptions
 
-export default function Album() {
+interface AlbumProps {
+  showToast: (options: ToastOptions) => void; // Add showToast prop
+}
+
+export default function Album({ showToast }: AlbumProps) {
   const { slug } = useParams<{ slug: string }>();
   const albumId = slug?.split('-').pop() || '';
   const { user } = useUser();
@@ -39,39 +45,100 @@ export default function Album() {
   const [isAddingToList, setIsAddingToList] = useState(false);
   const queryClient = useQueryClient();
 
-  const { data: album, isLoading: albumLoading, error: albumError } = useQuery({
-    queryKey: ['album', albumId],
-    queryFn: async () => {
-      const albumData = await getAlbum(albumId);
-      if (!albumData) {
-        throw new Error('Album not found');
+const { data: album, isLoading: albumLoading, error: albumError } = useQuery({
+  queryKey: ['album', albumId],
+  queryFn: async () => {
+    // 1. Try to fetch from Supabase first
+    let albumData = await getSupabaseAlbum(albumId);
+
+    if (!albumData) {
+      // 2. If not in Supabase, fetch from Spotify
+      const spotifyAlbumData = await getSpotifyAlbum(albumId);
+      if (!spotifyAlbumData) {
+        throw new Error('Album not found on Spotify');
       }
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-album`, {
+      // 3. Asynchronously trigger sync to Supabase (fire-and-forget)
+      // The UI will not wait for this to complete.
+      fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-album`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ album: albumData }),
+        body: JSON.stringify({ album: spotifyAlbumData }),
+      }).then(response => {
+        if (!response.ok) {
+          console.warn('Error asynchronously syncing album:', response.status, response.statusText);
+        }
+      }).catch(syncError => {
+        console.warn('Error triggering async sync-album function:', syncError);
       });
 
-      if (!response.ok) {
-        console.error('Error syncing album:', await response.text());
+      // 4. Immediately return the Spotify data for display.
+      // This is the key change for performance.
+      // Ensure the returned object matches the 'Album' interface expected by the component.
+      return {
+        id: spotifyAlbumData.id,
+        name: spotifyAlbumData.name,
+        artist: spotifyAlbumData.artist,
+        artist_id: spotifyAlbumData.artistId, // Map Spotify's artistId to Supabase's artist_id
+        cover_url: spotifyAlbumData.coverUrl, // Map Spotify's coverUrl to Supabase's cover_url
+        release_date: spotifyAlbumData.releaseDate,
+        album_type: spotifyAlbumData.type,
+        spotify_url: spotifyAlbumData.spotifyUrl,
+        popularity: spotifyAlbumData.popularity,
+        tracks: spotifyAlbumData.tracks,
+        coverUrl: spotifyAlbumData.coverUrl, // Keep this for component usage
+      };
+    }
+    // If albumData was found in Supabase, return it directly
+    return albumData;
+  },
+  enabled: !!albumId,
+  retry: 1,
+});
+
+// New query for artist data
+const { data: artist, isLoading: artistDataLoading } = useQuery({
+  queryKey: ['artist', album?.artist_id],
+  queryFn: async () => {
+    // 1. Try to fetch from Supabase first
+    let artistData = await getSupabaseArtist(album!.artist_id);
+
+    if (!artistData) {
+      // 2. If not in Supabase, fetch from Spotify
+      const spotifyArtistData = await getArtistProfile(album!.artist_id); // MODIFIED: Changed to getArtistProfile
+
+      if (spotifyArtistData) {
+        // 3. Asynchronously trigger sync to Supabase
+        try {
+          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-artist`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ artist: spotifyArtistData }),
+          }).then(response => {
+            if (!response.ok) {
+              console.warn('Error asynchronously syncing artist:', response.status, response.statusText);
+            }
+          }).catch(syncError => {
+            console.warn('Error triggering async sync-artist function:', syncError);
+          });
+        } catch (syncError) {
+          console.warn('Error setting up async sync-artist function:', syncError);
+        }
+        return spotifyArtistData; // Return Spotify data for immediate display
       }
+    }
+    return artistData; // Return Supabase data if found, or null if neither found
+  },
+  enabled: !!album?.artist_id,
+});
 
-      return albumData;
-    },
-    enabled: !!albumId,
-    retry: 1,
-  });
 
-  // New query for artist data
-  const { data: artist, isLoading: artistDataLoading } = useQuery({
-    queryKey: ['artist', album?.artistId],
-    queryFn: () => getArtist(album!.artistId),
-    enabled: !!album?.artistId,
-  });
 
   const { data: likes } = useQuery({
     queryKey: ['albumLikes', albumId, user?.id],
@@ -171,7 +238,11 @@ export default function Album() {
     }
   };
 
-  const formatReleaseDate = (dateString: string) => {
+  const formatReleaseDate = (dateString: string | undefined | null) => {
+    if (!dateString) {
+      return 'N/A';
+    }
+    
     // If it's a full date, format it normally
     const date = parseISO(dateString);
     if (isValid(date)) {
@@ -185,14 +256,17 @@ export default function Album() {
 
     // If it's a year-month, format accordingly
     if (/^\d{4}-\d{2}$/.test(dateString)) {
-      return format(parseISO(dateString + '-01'), 'MMMM yyyy');
+      const yearMonthDate = parseISO(dateString + '-01');
+      if (isValid(yearMonthDate)) { // Ensure the new date is valid
+        return format(yearMonthDate, 'MMMM yyyy');
+      }
     }
 
     // Fallback
     return dateString;
   };
 
-  if (albumLoading || reviewsLoading || artistDataLoading) { // Added artistDataLoading
+  if (albumLoading || reviewsLoading) { // Added artistDataLoading
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="text-xl text-secondary">Loading...</div>
@@ -221,7 +295,7 @@ export default function Album() {
   return (
     <div className="grid grid-cols-12 gap-6">
       {/* Album Header - spans full width */}
-      <div className="col-span-12 flex flex-col gap-3 md:flex-row md:gap-6 md:mb-3 items-center md:items-end">
+      <div className="col-span-12 flex flex-col gap-3 bg-gradient-to-t from-surface2/50 to-background rounded-b-lg p-6 md:flex-row md:gap-6 md:mb-3 items-center md:items-end">
         <div className="w-48 mx-auto flex-shrink-0">
           <img
             src={album.coverUrl}
@@ -232,33 +306,41 @@ export default function Album() {
 
         <div className="flex-1 flex flex-col justify-end text-center md:text-left">
           <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-2">{album.name}</h1>
-          <div className="flex items-center justify-center md:justify-start gap-2 mb-3">
-            {artist && (
-              <Link to={`/artist/${artist.id}`} className="flex-shrink-0">
-                <Avatar
-                  url={artist.imageUrl}
-                  name={artist.name}
-                  size="sm"
-                  className="w-8 h-8"
-                />
+             <div className="flex items-center justify-center md:justify-start gap-2 mb-3">
+              {/* DEBUGGING: Log the artist object and its imageUrl */}
+              {console.log('DEBUG: Artist object:', artist)}
+              {console.log('DEBUG: Artist imageUrl:', artist?.imageUrl)}
+            
+              {/* Always link to artist page, conditionally show image or initials fallback */}
+              <Link to={`/artist/${album.artist_id}`} className="flex items-center gap-2">
+                {artist && artist.imageUrl ? ( // Only show img if artist object and imageUrl exist
+                  <img
+                    src={artist.imageUrl}
+                    alt={artist.name}
+                    className="w-8 h-8 rounded-full object-cover"
+                  />
+                ) : (
+                  // Fallback for when artist.imageUrl is missing, but artist object exists
+                  artist && (
+                    <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-sm font-bold">
+                      {(artist.name || '?').charAt(0).toUpperCase()}
+                    </div>
+                  )
+                )}
+                <span className="text-base md:text-lg font-bold hover:text-accent transition-colors">
+                  {album.artist}
+                </span>
               </Link>
-            )}
-            <Link
-              to={`/artist/${album.artistId}`}
-              className="text-base md:text-lg font-bold hover:text-accent transition-colors"
-            >
-              {album.artist}
-            </Link>
-          </div>
+            </div>
           <div className="flex items-center justify-center md:justify-start gap-2 md:gap-4 text-sm md:text-md md:mb-3">
-            <span className="text-secondary capitalize">{album.type}</span>
+            <span className="text-secondary capitalize">{album.album_type}</span>
             <span className="text-secondary">•</span>
             <span className="text-secondary">
-              {formatReleaseDate(album.releaseDate)}
+              {formatReleaseDate(album.release_date)}
             </span>
             <span className="text-secondary">•</span>
             <span className="text-secondary">
-              {album.tracks.length} tracks, {Math.floor(album.tracks.reduce((acc, track) => acc + track.duration, 0) / 60)} min
+          {(album.tracks?.length || 0)} tracks, {Math.floor((album.tracks || []).reduce((acc, track) => acc + track.duration, 0) / 60)} min
             </span>
           </div>
 
@@ -604,14 +686,14 @@ export default function Album() {
               list.id !== 'liked-albums-list' &&
               list.list_items?.some(item => item.album_id === albumId)
             ).length > 0 ? (
-              <div className="space-y-4"> 
+              <div className="space-y-4">
                 {lists
                   .filter(list =>
                     list.id !== 'liked-albums-list' &&
                     list.list_items?.some(item => item.album_id === albumId)
                   )
                   .map(list => (
-                    <ListCard key={list.id} list={list} /> 
+                    <ListCard key={list.id} list={list} />
                   ))}
               </div>
             ) : (
@@ -630,7 +712,7 @@ export default function Album() {
             )}
           </div>
         </div>
-        
+
 
         {/* Right Column - Desktop-only Review/Listen buttons and Tracklist */}
         <div className="col-span-12 md:col-span-4">
@@ -667,7 +749,7 @@ export default function Album() {
             <div>
               <h2 className="text-lg md:text-xl lg:text-2xl font-bold mb-2 md:mb-4">Tracklist</h2>
               <div className="space-y-2">
-                {album.tracks.map((track) => (
+                {(album.tracks || []).map((track) => (
                   <div
                     key={track.id}
                     className="flex items-center justify-between py-2 px-4 bg-surface rounded text-xs"
@@ -683,7 +765,6 @@ export default function Album() {
                 ))}
               </div>
             </div>
-            <SimilarAlbums albumId={albumId} />
           </div>
         </div>
       </div>
@@ -720,6 +801,7 @@ export default function Album() {
         <AddToListModal
           albumId={albumId}
           onClose={() => setShowAddToListModal(false)}
+          showToast={showToast} // Pass showToast to AddToListModal
         />
       )}
     </div>

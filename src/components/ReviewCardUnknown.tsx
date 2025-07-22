@@ -2,14 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useUser } from '../hooks/useUser';
-import { useQuery } from '@tanstack/react-query';
-import { getAlbum, generateSlug } from '../lib/spotify';
+import { generateSlug } from '../lib/spotify';
 import { toggleReviewLike, createComment, toggleCommentLike } from '../lib/supabase';
 import type { Review } from '../lib/supabase';
 import Avatar from './Avatar';
 import CommentFeed from './CommentFeed';
 import StarRating from './StarRating';
-import { IoTrashOutline, IoHeart, IoHeartOutline, IoChatbox, IoChatboxOutline, IoReload } from 'react-icons/io5';
+import { IoTrashOutline, IoHeart, IoHeartOutline, IoChatbox, IoChatboxOutline, IoReload, IoFlagOutline } from 'react-icons/io5'; // ADDED: IoFlagOutline
+import ReportContentModal from './ReportContentModal'; // ADDED: Import ReportContentModal
+import { useToast } from '../hooks/useToast'; // ADDED: Import useToast
 
 interface ReviewCardUnknownProps {
   review: Review;
@@ -24,12 +25,11 @@ export default function ReviewCardUnknown({ review, onUpdate, onDelete }: Review
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isLiking, setIsLiking] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false); // ADDED: State for report modal
   const contentRef = useRef<HTMLDivElement>(null);
+  const { showToast } = useToast(); // ADDED: Initialize useToast
 
-  const { data: album } = useQuery({
-    queryKey: ['album', review.album_id],
-    queryFn: () => getAlbum(review.album_id),
-  });
+  const album = review.album;
 
   useEffect(() => {
   const timer = setTimeout(() => {
@@ -97,35 +97,57 @@ export default function ReviewCardUnknown({ review, onUpdate, onDelete }: Review
     setShowDeleteConfirm(false);
   };
 
-  if (!album) return null;
+  // ADDED: Function to handle reporting
+  const handleReport = () => {
+    if (!user) {
+      showToast({ title: 'Not Authenticated', description: 'Please log in to report content.' });
+      return;
+    }
+    setShowReportModal(true);
+  };
+
+  // ADDED: Conditional rendering based on moderation_status
+  const isModerated = review.moderation_status === 'pending_review' || review.moderation_status === 'rejected';
+  const isOwner = user?.id === review.user_id;
+
+  if (isModerated && !isOwner) {
+    return (
+      <div className="xl:bg-surface xl:rounded-xl overflow-hidden border-t border-accent2/50 mx-[-1rem] xl:border-hidden">
+        <div className="p-4 pt-3 pb-3 md:p-6 text-center text-secondary">
+          <p className="font-bold mb-2">This content is currently under review.</p>
+          <p className="text-sm">It will be visible again once approved by a moderator.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="xl:bg-surface overflow-hidden border-t border-accent2/80 mx-[-1rem]">
+    <div className="xl:bg-surface xl:rounded-xl overflow-hidden border-t border-accent2/50 mx-[-1rem] xl:border-hidden">
       <div className="p-4 pt-3 pb-3 md:p-6">
         <div className="flex justify-between mb-3">
           <div className="flex gap-4">
             <Link
-              to={`/album/${generateSlug(`${album.artist} ${album.name}`, album.id)}`}
+              to={`/album/${generateSlug(`${album?.artist} ${album?.name}`, album?.id || '')}`}
               className="flex-shrink-0"
             >
               <img
-                src={album.coverUrl}
-                alt={album.name}
+                src={album?.cover_url}
+                alt={album?.name}
                 className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded"
               />
             </Link>
             <div className="flex flex-col justify-end">
               <Link
-                to={`/album/${generateSlug(`${album.artist} ${album.name}`, album.id)}`}
+                to={`/album/${generateSlug(`${album?.artist} ${album?.name}`, album?.id || '')}`}
                 className="font-bold text-sm sm:text-lg line-clamp-2 hover:text-accent transition-colors"
               >
-                {album.name}
+                {album?.name} 
               </Link>
               <Link
-                to={`/artist/${album.artistId}`}
+                to={`/artist/${album?.artist_id}`}
                 className="text-secondary text-sm sm:text-base line-clamp-1 hover:text-primary transition-colors"
               >
-                {album.artist}
+                {album?.artist} 
               </Link>
             </div>
           </div>
@@ -200,14 +222,6 @@ export default function ReviewCardUnknown({ review, onUpdate, onDelete }: Review
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
-            {user?.id === review.user_id && (
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="text-white hover:text-error transition-colors"
-              >
-                <IoTrashOutline className="text-2xl sm:text-4xl" />
-              </button>
-            )}         
             <button
               onClick={handleLike}
               className="flex items-center gap-1 transition-colors"
@@ -231,6 +245,22 @@ export default function ReviewCardUnknown({ review, onUpdate, onDelete }: Review
               )}
               <span className="text-white font-bold">{review.review_comments?.length || 0}</span>
             </button>
+            {user?.id === review.user_id ? ( // ADDED: Conditional rendering for owner vs. reporter
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="text-white hover:text-error transition-colors"
+              >
+                <IoTrashOutline className="text-2xl sm:text-3xl" />
+              </button>
+            ) : (
+              <button
+                onClick={handleReport}
+                className="text-white hover:text-secondary transition-colors"
+                title="Report content"
+              >
+                <IoFlagOutline className="text-2xl sm:text-3xl" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -268,6 +298,16 @@ export default function ReviewCardUnknown({ review, onUpdate, onDelete }: Review
             onLike={handleCommentLike}
           />
         </div>
+      )}
+
+      {showReportModal && ( // ADDED: ReportContentModal
+        <ReportContentModal
+          contentType="review"
+          contentId={review.id}
+          onClose={() => setShowReportModal(false)}
+          onSuccess={onUpdate} // Refresh reviews after reporting
+          showToast={showToast}
+        />
       )}
     </div>
   );

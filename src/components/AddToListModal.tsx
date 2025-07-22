@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUserLists, createList, addToList } from '../lib/supabase';
 import { useUser } from '../hooks/useUser';
+import { ToastOptions } from '../hooks/useToast'; // Import ToastOptions
 import { IoAdd } from 'react-icons/io5';
 
 interface AddToListModalProps {
   albumId?: string;
   artistId?: string;
   onClose: () => void;
+  showToast: (options: ToastOptions) => void; // Add showToast prop
 }
 
-export default function AddToListModal({ albumId, artistId, onClose }: AddToListModalProps) {
+export default function AddToListModal({ albumId, artistId, onClose, showToast }: AddToListModalProps) {
   const { user } = useUser();
   const queryClient = useQueryClient();
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -38,6 +40,7 @@ export default function AddToListModal({ albumId, artistId, onClose }: AddToList
       queryClient.invalidateQueries({ queryKey: ['userLists', user?.id] });
       setShowCreateForm(false);
       setNewList({ title: '', description: '' });
+      showToast({ title: 'List Created!', description: 'Your new list has been created.' });
     },
   });
 
@@ -46,18 +49,19 @@ export default function AddToListModal({ albumId, artistId, onClose }: AddToList
       const payload: { list_id: string; album_id?: string; artist_id?: string } = {
         list_id: listId,
       };
-      
+
       if (albumId) {
         payload.album_id = albumId;
       } else if (artistId) {
         payload.artist_id = artistId;
       }
-      
+
       return addToList(payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['userLists', user?.id] });
-      onClose();
+      showToast({ title: 'Item Added!', description: 'The item has been successfully added to your list.' });
+      onClose(); // Close the modal AFTER the toast is triggered
     },
   });
 
@@ -88,7 +92,7 @@ export default function AddToListModal({ albumId, artistId, onClose }: AddToList
   const itemType = albumId ? 'album' : 'artist';
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
       onClick={(e) => {
         if (e.target === e.currentTarget) {

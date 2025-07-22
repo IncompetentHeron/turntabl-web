@@ -1,15 +1,12 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getFilteredAlbums } from '../lib/supabase';
+import { getOurPopularAlbums } from '../lib/supabase';
 import { generateSlug } from '../lib/spotify';
 
 export default function PopularAlbums() {
   const { data: albums = [], isLoading } = useQuery({
-    queryKey: ['popularAlbums'],
-    queryFn: () => getFilteredAlbums({
-      sortBy: 'popular_all_time',
-      limit: 10,
-    }),
+    queryKey: ['ourPopularAlbums'],
+    queryFn: () => getOurPopularAlbums(10),
     staleTime: 1000 * 60 * 60, // 1 hour
   });
 
@@ -25,12 +22,6 @@ export default function PopularAlbums() {
     <section>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-lg md:text-xl lg:text-2xl font-bold">Popular This Week</h2>
-        <Link 
-          to="/albums"
-          className="btn btn-secondary text-sm md:text-base lg:text-lg hover:text-accent2 transition-colors"
-        >
-          See all
-        </Link>
       </div>
       <div className="flex flex-row overflow-x-auto lg:grid grid-cols-5 gap-4">
         {albums.slice(0, 10).map((album) => (

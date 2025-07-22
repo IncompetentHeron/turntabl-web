@@ -9,6 +9,8 @@ interface AvatarProps {
 }
 
 export default function Avatar({ url, name, size = 'md', height, className = '' }: AvatarProps) {
+  console.log('Avatar component loading URL:', url);
+  
   const dimensions = useMemo(() => {
     if (height) {
       return `w-auto h-[${height}px]`;

@@ -69,6 +69,7 @@ Deno.serve(async (req) => {
         album_type: album.type,
         popularity: album.popularity || 0,
         spotify_url: album.spotifyUrl,
+        tracks: album.tracks,
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'id'

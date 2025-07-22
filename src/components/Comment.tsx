@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format, isToday } from 'date-fns';
-import { IoHeartOutline, IoHeart, IoChatboxOutline } from 'react-icons/io5';
+import { IoHeartOutline, IoHeart, IoChatboxOutline, IoFlagOutline } from 'react-icons/io5'; // ADDED: IoFlagOutline
 import Avatar from './Avatar';
 import type { ReviewComment } from '../lib/supabase';
+import ReportContentModal from './ReportContentModal'; // ADDED: Import ReportContentModal
+import { useUser } from '../hooks/useUser'; // ADDED: Import useUser
+import { useToast } from '../hooks/useToast'; // ADDED: Import useToast
 
 interface CommentProps {
   comment: ReviewComment;
@@ -15,6 +18,7 @@ interface CommentProps {
   depth?: number;
   replies?: ReviewComment[];
   onComment?: (content: string, parentId: string) => void;
+  onUpdate?: () => void; // ADDED: onUpdate prop for refreshing comments
 }
 
 export default function Comment({ 
@@ -26,11 +30,15 @@ export default function Comment({
   replyCount = 0,
   depth = 0,
   replies = [],
-  onComment
+  onComment,
+  onUpdate // ADDED: Destructure onUpdate
 }: CommentProps) {
+  const { user } = useUser(); // ADDED: Initialize useUser
+  const { showToast } = useToast(); // ADDED: Initialize useToast
   const [showReplies, setShowReplies] = useState(false);
   const [isReplying, setIsReplying] = useState(false);
   const [replyContent, setReplyContent] = useState('');
+  const [showReportModal, setShowReportModal] = useState(false); // ADDED: State for report modal
 
   const formattedDate = isToday(new Date(comment.created_at))
     ? format(new Date(comment.created_at), 'h:mm a')
@@ -43,6 +51,39 @@ export default function Comment({
       setIsReplying(false);
     }
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => { // ADDED: handleKeyDown function
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleReply();
+    }
+  };
+
+  // ADDED: Function to handle reporting
+  const handleReport = () => {
+    if (!user) {
+      showToast({ title: 'Not Authenticated', description: 'Please log in to report content.' });
+      return;
+    }
+    setShowReportModal(true);
+  };
+
+  // ADDED: Conditional rendering based on moderation_status
+  const isModerated = comment.moderation_status === 'pending_review' || comment.moderation_status === 'rejected';
+  const isOwner = user?.id === comment.user_id;
+
+  if (isModerated && !isOwner) {
+    return (
+      <div className="space-y-4">
+        <div 
+          className="flex gap-3 bg-surface/50 p-3 rounded-lg text-center text-secondary"
+          style={{ marginLeft: `${depth * 32}px` }}
+        >
+          <p className="font-bold mb-1">This comment is currently under review.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -86,6 +127,15 @@ export default function Comment({
             >
               Reply
             </button>
+            {user?.id !== comment.user_id && ( // ADDED: Report button for non-owners
+              <button
+                onClick={handleReport}
+                className="text-sm text-secondary hover:text-primary transition-colors"
+                title="Report comment"
+              >
+                <IoFlagOutline size={16} />
+              </button>
+            )}
           </div>
 
           {isReplying && (
@@ -94,6 +144,7 @@ export default function Comment({
                 type="text"
                 value={replyContent}
                 onChange={(e) => setReplyContent(e.target.value)}
+                onKeyDown={handleKeyDown}
                 className="flex-1 px-3 py-1 bg-surface border border-white/10 rounded-lg text-sm"
                 placeholder="Write a reply..."
               />
@@ -128,11 +179,22 @@ export default function Comment({
                   onReply={() => {}}
                   depth={depth + 1}
                   onComment={onComment}
+                  onUpdate={onUpdate} // ADDED: Pass onUpdate to nested comments
                 />
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {showReportModal && ( // ADDED: ReportContentModal
+        <ReportContentModal
+          contentType="comment"
+          contentId={comment.id}
+          onClose={() => setShowReportModal(false)}
+          onSuccess={onUpdate || (() => {})} // Refresh comments after reporting
+          showToast={showToast}
+        />
       )}
     </div>
   );

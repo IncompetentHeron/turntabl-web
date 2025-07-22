@@ -56,7 +56,7 @@ export default function CommunityReviews() {
           See all
         </Link>
       </div>
-      <div className="space-y-4">
+      <div className="space-y-2">
         {reviews.map((review) => (
           <ReviewCardUnknown
             key={review.id}

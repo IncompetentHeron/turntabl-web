@@ -11,7 +11,7 @@ interface SpotifyAlbum {
   artistId: string;
   coverUrl: string;
   releaseDate: string;
-  type: 'album' | 'single' | 'compilation'; // Added 'compilation'
+  type: 'album' | 'single' | 'compilation';
   tracks: SpotifyTrack[];
   popularity?: number;
   spotifyUrl?: string;
@@ -23,6 +23,7 @@ interface SpotifyArtist {
   imageUrl: string;
   genres: string[];
   albums: SpotifyAlbum[];
+  spotifyUrl?: string;
 }
 
 interface SpotifyTrack {
@@ -66,7 +67,8 @@ async function getAccessToken(): Promise<string> {
   return accessToken;
 }
 
-async function spotifyApiCall<T>(endpoint: string): Promise<T> {
+// MODIFIED: Add currentRetry as a parameter with a default value
+async function spotifyApiCall<T>(endpoint: string, currentRetry: number = 0): Promise<T> {
   try {
     const token = await getAccessToken();
     const response = await axios.get(`${SPOTIFY_API_URL}${endpoint}`, {
@@ -74,18 +76,22 @@ async function spotifyApiCall<T>(endpoint: string): Promise<T> {
         Authorization: `Bearer ${token}`,
       },
     });
-    retryCount = 0;
+    // No need to reset a global retryCount here
     return response.data;
   } catch (error: any) {
-    if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
-      retryCount++;
+    // Use the local currentRetry for the condition and increment
+    if (error.response?.status === 429 && currentRetry < MAX_RETRIES) {
+      const nextRetryCount = currentRetry + 1; // Increment for the next attempt
       const delay = error.response.headers['retry-after']
         ? parseInt(error.response.headers['retry-after']) * 1000
-        : RETRY_DELAY * retryCount;
+        : RETRY_DELAY * nextRetryCount; // Use nextRetryCount for delay calculation
 
+      console.warn(`Rate limit hit for ${endpoint}. Retrying after ${delay / 1000} seconds... (Attempt ${nextRetryCount}/${MAX_RETRIES})`);
       await new Promise(resolve => setTimeout(resolve, delay));
-      return spotifyApiCall(endpoint);
+      // Recursively call with the incremented retry count
+      return spotifyApiCall(endpoint, nextRetryCount);
     }
+    // Re-throw the error if it's not a 429 or if retries are exhausted
     throw error;
   }
 }
@@ -116,7 +122,8 @@ function transformSpotifyArtist(spotifyData: any): SpotifyArtist {
     name: spotifyData.name,
     imageUrl: spotifyData.images[0]?.url || 'https://via.placeholder.com/300',
     genres: spotifyData.genres || [],
-    albums: [],
+    spotifyUrl: spotifyData.external_urls?.spotify, // <--- ADD THIS LINE
+    albums: [], // This was intentionally left empty as per previous recommendations
   };
 }
 
@@ -152,18 +159,37 @@ export async function getAlbum(id: string): Promise<SpotifyAlbum | null> {
   }
 }
 
-export async function getArtistAlbums(id: string): Promise<SpotifyAlbum[]> {
+// MODIFIED: Added optional fetchPopularity parameter
+export async function getArtistAlbums(id: string, fetchPopularity: boolean = false): Promise<SpotifyAlbum[]> {
   try {
     let allAlbums: SpotifyAlbum[] = [];
     let offset = 0;
-    const limit = 50; // Max limit per request
+    const limit = 50; // Max limit per request for artist albums endpoint
 
     while (true) {
       const albumsData = await spotifyApiCall<any>(
         `/artists/${id}/albums?include_groups=album,single,compilation&limit=${limit}&offset=${offset}`
       );
 
-      const transformedAlbums = albumsData.items.map(transformSpotifyAlbum);
+      let transformedAlbums: SpotifyAlbum[] = [];
+
+      if (fetchPopularity) {
+        // Fetch full details for each album to get popularity
+        const albumDetailsPromises = albumsData.items.map(async (album: any) => {
+          try {
+            const detailedAlbumData = await spotifyApiCall<any>(`/albums/${album.id}`);
+            return transformSpotifyAlbum(detailedAlbumData);
+          } catch (detailError) {
+            console.warn(`Could not fetch details for album ${album.id}:`, detailError);
+            return null; // Return null for failed fetches
+          }
+        });
+        transformedAlbums = (await Promise.all(albumDetailsPromises)).filter(Boolean); // Filter out nulls
+      } else {
+        // Only transform basic album data if popularity is not needed
+        transformedAlbums = albumsData.items.map(transformSpotifyAlbum);
+      }
+
       allAlbums = allAlbums.concat(transformedAlbums);
 
       if (albumsData.next) {
@@ -182,33 +208,15 @@ export async function getArtistAlbums(id: string): Promise<SpotifyAlbum[]> {
 
 export async function getArtist(id: string): Promise<SpotifyArtist | null> {
   try {
-    const [artistData, albums] = await Promise.all([
-      spotifyApiCall<any>(`/artists/${id}`),
-      getArtistAlbums(id),
-    ]);
-
+    // Only fetch artist profile data - no albums, no additional API calls
+    const artistData = await spotifyApiCall<any>(`/artists/${id}`);
     const artist = transformSpotifyArtist(artistData);
-    artist.albums = albums;
-
+    // Albums will be fetched separately from Supabase after sync-artist runs
+    artist.albums = [];
     return artist;
   } catch (error) {
     console.error('Error fetching artist:', error);
     return null;
-  }
-}
-
-export async function getSimilarArtists(id: string): Promise<SpotifyArtist[]> {
-  try {
-    const data = await spotifyApiCall<any>(`/artists/${id}/related-artists`);
-    return data.artists.slice(0, 10).map(transformSpotifyArtist);
-  } catch (error: any) {
-    // Handle 404 errors gracefully - some artists may not have related artists
-    if (error.response?.status === 404) {
-      console.warn('No similar artists found for artist ID:', id);
-      return [];
-    }
-    console.error('Error fetching similar artists:', error);
-    return [];
   }
 }
 
@@ -231,29 +239,13 @@ export async function getNewReleases(): Promise<SpotifyAlbum[]> {
   }
 }
 
-export async function getAlbumRecommendations(seedAlbumId: string): Promise<SpotifyAlbum[]> {
+
+export async function getArtistProfile(id: string): Promise<SpotifyArtist | null> {
   try {
-    const albumData = await spotifyApiCall<any>(`/albums/${seedAlbumId}`);
-    const artistId = albumData.artists[0]?.id;
-
-    if (!artistId) {
-      console.warn(`No artist found for album ID: ${seedAlbumId}`);
-      return [];
-    }
-
-    const data = await spotifyApiCall<any>(
-      `/recommendations?seed_artists=${artistId}&limit=10`
-    );
-
-    return data.tracks
-      .map((track: any) => transformSpotifyAlbum(track.album)) // Recommendations return tracks, extract album info
-      .filter((album: SpotifyAlbum) => album.id !== seedAlbumId)
-      .filter((album: SpotifyAlbum, index: number, self: SpotifyAlbum[]) => // Deduplicate albums
-        index === self.findIndex((a) => a.id === album.id)
-      )
-      .slice(0, 5); // Limit to top 5 unique similar albums
-  } catch (error: any) {
-    console.error('Error fetching album recommendations:', error);
-    return [];
+    const artistData = await spotifyApiCall<any>(`/artists/${id}`);
+    return transformSpotifyArtist(artistData);
+  } catch (error) {
+    console.error('Error fetching artist profile:', error);
+    return null;
   }
 }

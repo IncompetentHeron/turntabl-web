@@ -125,7 +125,7 @@ export default function ProfileForm({ profile, onSuccess, onCancel }: ProfileFor
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6"onClick={(e) => e.stopPropagation()}>
       <div className="flex justify-center">
         <AvatarUpload
           currentUrl={formData.avatar_url}

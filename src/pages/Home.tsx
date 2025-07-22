@@ -9,22 +9,24 @@ import TrendingLists from '../components/TrendingLists';
 import HallOfFame from '../components/HallOfFame';
 import CommunityReviews from '../components/CommunityReviews';
 import CommunityPopularAlbums from '../components/CommunityPopularAlbums';
+import { ToastOptions } from '../hooks/useToast'; // Import ToastOptions
 
 interface HomeProps {
   onShowAuth: (view: 'sign_in' | 'sign_up') => void;
+  showToast: (options: ToastOptions) => void; // Add showToast prop
 }
 
-export default function Home({ onShowAuth }: HomeProps) {
+export default function Home({ onShowAuth, showToast }: HomeProps) {
   const { user } = useUser();
 
   return (
     <div className="space-y-12">
       <AlbumCarousel />
-      
+ 
       <section className="text-center">
         <h2 className="text-xl sm:text-2xl md:text-4xl mb-3 font-serif">Show them why your taste is <strong>better</strong></h2>
         <h1 className="text-xl text-secondary">
-          Discover, review, and share your favourite music with Turntabl
+          Review, track, and share your favourite music with Turntabl
         </h1>
       </section>
       {user ? (
@@ -41,12 +43,11 @@ export default function Home({ onShowAuth }: HomeProps) {
           </button>
         </section>
       )}
-      
+
       <PopularAlbums />
       <PopularReviews />
-      <RecentlyReviewed />
       <TrendingLists />
-      <HallOfFame />
+      <RecentlyReviewed />
     </div>
   );
 }

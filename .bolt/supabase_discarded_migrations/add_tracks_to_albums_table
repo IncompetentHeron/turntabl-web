@@ -1,0 +1,6 @@
+-- Add the new 'tracks' column to the 'albums' table
+ALTER TABLE public.albums
+ADD COLUMN tracks jsonb;
+
+-- Optional: Add a comment for documentation
+COMMENT ON COLUMN public.albums.tracks IS 'JSONB array of track objects (id, name, duration, trackNumber) for the album.';

@@ -1,28 +1,39 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getNewReleases, generateSlug } from '../lib/spotify';
+import { getAlbum, getNewReleases, generateSlug } from '../lib/spotify';
+
+const FEATURED_ALBUM_IDS = [
+  '3YVnHpyms4rLr3fXS0ROQy', 
+  '28bHj2enHkHVFLwuWmkwlQ', 
+  '7pcBXbl1g198PNAxt44bHQ'  
+];
 
 export default function AlbumCarousel() {
   const [currentIndex, setCurrentIndex] = useState(0);
   
-  const { data: albums = [] } = useQuery({
-    queryKey: ['newReleases'],
-    queryFn: getNewReleases,
-    staleTime: 1000 * 60 * 60 * 24 * 7, // 7 days
+ const { data: albums = [], isLoading } = useQuery({
+    queryKey: ['featuredAlbums'], 
+    queryFn: async () => {
+      const fetchedAlbums = await Promise.all(
+        FEATURED_ALBUM_IDS.map(id => getAlbum(id))
+      );
+      return fetchedAlbums.filter(Boolean);
+    },
+    staleTime: 1000 * 60 * 60 * 24 * 7, 
   });
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setCurrentIndex((current) => (current + 1) % 3);
+      setCurrentIndex((current) => (current + 1) % albums.length);
     }, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [albums]);
 
   if (albums.length === 0) return null;
 
   return (
-    <div className="relative h-[100px] sm:h-[150px] md:h-[350px] mb-10 md:mb-10">
+    <div className="relative mt-5 h-[100px] sm:h-[150px] md:h-[350px] mb-8 md:mb-10 glow-container">
       <div className="absolute inset-0 flex items-center justify-center perspective">
         {albums.map((album, index) => {
           const position = (index - currentIndex + 3) % 3;
